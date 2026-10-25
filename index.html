@@ -1,0 +1,925 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Дихоптический тетрис</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Тетрис для тренировки при амблиопии в VR: падающие фигуры видит слабый глаз, стакан — сильный.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@500;700&family=Unbounded:wght@600;800&display=swap">
+<style>
+/* Layout: hero (anaglyph title + live per-eye preview), then the session "prescription" card beside the controls, then the training diary. One column under 820px.
+   Single dark look on purpose: the game itself lives in a dark void, and the page reads as its anteroom. Left eye = anaglyph red (OS), right eye = anaglyph cyan (OD). */
+:root{
+  color-scheme: dark;
+  --void:#04060a;
+  --ink:#0a0e16;
+  --panel:#111726;
+  --raise:#1a2338;
+  --line:#243049;
+  --text:#e8ecf4;
+  --text-2:#c3cad8;
+  --muted:#8e98ad;
+  --os:#ff6a5c;
+  --od:#3fd5e6;
+  --os-ghost:rgba(255,106,92,.72);
+  --od-ghost:rgba(63,213,230,.72);
+  --display:"Unbounded","Arial Black",system-ui,sans-serif;
+  --body:"Golos Text",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  --r:16px;
+}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{background:var(--ink);color:var(--text)}
+body{font-family:var(--body);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+body.playing{overflow:hidden}
+
+.page{max-width:1120px;margin:0 auto;padding-block:36px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:32px}
+
+.hero{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:40px;align-items:center}
+.hero-copy{min-width:0}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:0 0 14px}
+h1{font-family:var(--display);font-weight:800;font-size:clamp(30px,5.2vw,58px);line-height:1.04;letter-spacing:-.01em;margin:0 0 20px;text-wrap:balance;text-shadow:-3px 0 var(--os-ghost),3px 0 var(--od-ghost)}
+.lede{font-size:18px;color:var(--text-2);max-width:56ch;margin:0 0 26px}
+.actions{display:flex;flex-wrap:wrap;gap:12px}
+.btn{font:600 16px/1 var(--body);padding:15px 24px;min-height:50px;border-radius:999px;border:1.5px solid var(--line);background:transparent;color:var(--text);cursor:pointer;display:inline-flex;align-items:center;gap:10px}
+.btn:hover:not(:disabled){border-color:var(--muted)}
+.btn:focus-visible{outline:2px solid var(--od);outline-offset:3px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:var(--text);color:var(--ink);border-color:var(--text)}
+.btn-primary:hover:not(:disabled){border-color:var(--text);background:#ffffff}
+.btn-small{padding:9px 16px;min-height:38px;font-size:14px}
+.btn-quiet{border-color:transparent;color:var(--muted);padding-inline:10px}
+.glasses{width:22px;height:12px;flex:none}
+.status{font-size:14px;color:var(--muted);margin:16px 0 0;max-width:58ch}
+.status.ok{color:var(--text-2)}
+
+.eyes{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:12px;min-width:0}
+.eye{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px;display:grid;gap:10px;align-content:start;min-width:0}
+.eye canvas{display:block;width:100%;max-width:100%;aspect-ratio:1/2;height:auto;border-radius:8px;background:var(--void)}
+.eye-head{display:flex;justify-content:space-between;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;flex-wrap:wrap}
+.eye-name{display:inline-flex;align-items:center;gap:6px;letter-spacing:.04em}
+.eye[data-eye="left"] .eye-name{color:var(--os)}
+.eye[data-eye="right"] .eye-name{color:var(--od)}
+.eye-role{padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.eye-role.is-weak{color:var(--ink);background:var(--text);border-color:var(--text)}
+.eye-cap{margin:0;font-size:13px;color:var(--muted);line-height:1.4}
+.eyes figcaption{grid-column:1/-1;font-size:13px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;background:currentColor;flex:none}
+.dot.os{color:var(--os)}
+.dot.od{color:var(--od)}
+
+.grid2{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:24px;align-items:start}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:24px;display:grid;gap:22px;min-width:0}
+.card-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h2{font-family:var(--display);font-weight:600;font-size:19px;margin:0;letter-spacing:.01em}
+h3{font-family:var(--mono);font-size:12px;font-weight:500;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin:0}
+.tag{font-family:var(--mono);font-size:13px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:2px 8px}
+
+.field{display:grid;gap:10px}
+.field.row{grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:18px}
+.field-label{font-weight:600;font-size:15px;display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+output{font-family:var(--mono);font-weight:700;font-variant-numeric:tabular-nums}
+.hint{margin:0;font-size:13.5px;color:var(--muted);line-height:1.45}
+.field.row .hint{margin-top:4px}
+
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--ink);padding:5px;border-radius:12px;border:1px solid var(--line)}
+.seg label,.chips label{position:relative;display:block}
+.seg input,.chips input{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;cursor:pointer}
+.seg span{display:flex;align-items:center;justify-content:center;gap:8px;padding:11px 8px;border-radius:8px;font-family:var(--mono);font-size:14px;color:var(--muted);text-align:center}
+.seg input:checked + span{background:var(--raise);color:var(--text)}
+.seg input:focus-visible + span,.chips input:focus-visible + span{outline:2px solid var(--od);outline-offset:2px}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips span{display:block;padding:9px 15px;border-radius:999px;border:1px solid var(--line);font-size:14px;color:var(--text-2);font-variant-numeric:tabular-nums}
+.chips input:checked + span{background:var(--text);color:var(--ink);border-color:var(--text);font-weight:600}
+
+input[type="range"]{width:100%;margin:0;accent-color:var(--text);height:28px;cursor:pointer}
+input[type="range"]:focus-visible{outline:2px solid var(--od);outline-offset:4px;border-radius:4px}
+
+.switch{position:relative;width:52px;height:30px;flex:none;display:block}
+.switch input{position:absolute;inset:0;width:100%;height:100%;opacity:0;margin:0;cursor:pointer;z-index:1}
+.switch span{position:absolute;inset:0;border-radius:999px;background:var(--line);transition:background .15s}
+.switch span::after{content:"";position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
+.switch input:checked + span{background:var(--text)}
+.switch input:checked + span::after{transform:translateX(22px);background:var(--ink)}
+.switch input:focus-visible + span{outline:2px solid var(--od);outline-offset:3px}
+
+.keys{margin:0;display:grid}
+.keys div{display:grid;grid-template-columns:minmax(0,10.5em) minmax(0,1fr);gap:12px;padding:9px 0;border-top:1px solid var(--line);align-items:baseline}
+.keys dt{font-size:14px;color:var(--text);display:flex;flex-wrap:wrap;gap:4px;align-items:baseline}
+.keys dd{margin:0;color:var(--muted);font-size:14.5px}
+kbd{font-family:var(--mono);font-size:12.5px;line-height:1.5;padding:1px 7px;border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;background:var(--ink);color:var(--text);white-space:nowrap}
+.ctl-group{display:grid;gap:10px}
+
+.today{margin:0;font-size:16px;color:var(--text-2)}
+.today b{color:var(--text);font-variant-numeric:tabular-nums}
+.table-wrap{overflow-x:auto;margin:0 -4px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;min-width:520px}
+th{font-family:var(--mono);font-size:11.5px;font-weight:500;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);text-align:right;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--mono);font-size:14px;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+td:first-child{font-family:var(--body);color:var(--text-2)}
+.mins{display:inline-flex;align-items:center;gap:8px;justify-content:flex-end}
+.bar{width:56px;height:6px;border-radius:3px;background:var(--line);overflow:hidden;display:inline-block}
+.bar i{display:block;height:100%;background:var(--text)}
+.bar.full i{background:var(--od)}
+.empty{margin:0;color:var(--muted);font-size:15px}
+.st-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.confirm-q{font-size:14px;color:var(--text-2)}
+.fine{margin:0;font-size:13px;color:var(--muted)}
+
+.note{font-size:13.5px;color:var(--muted);max-width:78ch;border-top:1px solid var(--line);padding-top:20px;margin:0}
+
+.play{position:fixed;inset:0;z-index:50;background:var(--void);display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);outline:none}
+.play-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));border-bottom:1px solid var(--line)}
+.play-title{font-size:13px;color:var(--muted);min-width:0}
+.play-title b{color:var(--text);font-weight:600}
+.stage{flex:1;min-height:0;position:relative}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.pad{display:none;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;padding-block:10px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));border-top:1px solid var(--line)}
+.pad button{min-height:58px;border-radius:12px;background:var(--panel);border:1px solid var(--line);color:var(--text);font:600 15px/1.1 var(--body);touch-action:manipulation;user-select:none;-webkit-user-select:none;cursor:pointer}
+.pad button:active{background:var(--raise)}
+@media (pointer:coarse){.pad{display:grid}}
+
+@media (max-width:820px){
+  .hero,.grid2{grid-template-columns:1fr}
+  .hero{gap:28px}
+}
+@media (max-width:480px){
+  .card{padding:18px}
+  .keys div{grid-template-columns:minmax(0,9em) minmax(0,1fr)}
+  .lede{font-size:17px}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important;animation:none!important}
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Тренажёр для Quest 2 · амблиопия</p>
+      <h1>Дихоптический тетрис</h1>
+      <p class="lede">Падающие фигуры видит только слабый глаз, а уложенный стакан — только сильный, причём приглушённо. Играть получится, только когда мозг сводит картинки обоих глаз в одну.</p>
+      <div class="actions">
+        <button id="btn-vr" class="btn btn-primary" type="button" disabled>
+          <svg class="glasses" viewBox="0 0 22 12" aria-hidden="true"><rect x="1" y="1" width="8.5" height="10" rx="3" fill="#ff6a5c"/><rect x="12.5" y="1" width="8.5" height="10" rx="3" fill="#3fd5e6"/><rect x="9" y="4.5" width="4" height="2" fill="currentColor"/></svg>
+          Войти в VR
+        </button>
+        <button id="btn-screen" class="btn" type="button">Играть на экране</button>
+      </div>
+      <p id="vr-status" class="status" role="status">Проверяю, доступен ли VR…</p>
+    </div>
+    <figure class="eyes" aria-label="Что видит каждый глаз">
+      <div class="eye" data-eye="left">
+        <div class="eye-head"><span class="eye-name"><i class="dot"></i>OS · левый</span><span class="eye-role" id="role-left">слабый</span></div>
+        <canvas id="pv-left" width="180" height="360" aria-label="Поле для левого глаза"></canvas>
+        <p class="eye-cap" id="cap-left"></p>
+      </div>
+      <div class="eye" data-eye="right">
+        <div class="eye-head"><span class="eye-name"><i class="dot"></i>OD · правый</span><span class="eye-role" id="role-right">сильный</span></div>
+        <canvas id="pv-right" width="180" height="360" aria-label="Поле для правого глаза"></canvas>
+        <p class="eye-cap" id="cap-right"></p>
+      </div>
+      <figcaption>Так поле выглядит для каждого глаза по отдельности. В шлеме две картинки сливаются в одну.</figcaption>
+    </figure>
+  </header>
+
+  <div class="grid2">
+    <section class="card" aria-labelledby="rx-title">
+      <div class="card-head"><h2 id="rx-title">Параметры сессии</h2><span class="tag">Rx</span></div>
+
+      <div class="field">
+        <span class="field-label" id="weak-label">Слабый глаз</span>
+        <div class="seg" role="radiogroup" aria-labelledby="weak-label">
+          <label><input type="radio" name="weak" value="left" id="weak-left"><span><i class="dot os"></i>OS · левый</span></label>
+          <label><input type="radio" name="weak" value="right" id="weak-right"><span><i class="dot od"></i>OD · правый</span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="contrast"><span>Яркость для сильного глаза</span><output id="contrast-out" for="contrast">30 %</output></label>
+        <input type="range" id="contrast" min="10" max="100" step="5" value="30">
+        <p class="hint">Подберите уровень, при котором фигуры и стакан видны одинаково чётко. Пропадает стакан — прибавьте. Пропадают падающие фигуры — убавьте.</p>
+      </div>
+
+      <div class="field row">
+        <div><span class="field-label" id="auto-label">Авто-баланс</span><p class="hint">+5 % за каждые 10 линий в партии. −5 %, если партия закончилась раньше 5 линий.</p></div>
+        <label class="switch"><input type="checkbox" id="auto" role="switch" aria-labelledby="auto-label"><span></span></label>
+      </div>
+
+      <div class="field">
+        <span class="field-label" id="min-label">Длительность сессии</span>
+        <div class="chips" role="radiogroup" aria-labelledby="min-label">
+          <label><input type="radio" name="minutes" value="15" id="min-15"><span>15 мин</span></label>
+          <label><input type="radio" name="minutes" value="20" id="min-20"><span>20 мин</span></label>
+          <label><input type="radio" name="minutes" value="30" id="min-30"><span>30 мин</span></label>
+          <label><input type="radio" name="minutes" value="45" id="min-45"><span>45 мин</span></label>
+          <label><input type="radio" name="minutes" value="60" id="min-60"><span>60 мин</span></label>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="field-label" id="speed-label">Начальная скорость</span>
+        <div class="chips" role="radiogroup" aria-labelledby="speed-label">
+          <label><input type="radio" name="speed" value="1" id="speed-1"><span>Медленно</span></label>
+          <label><input type="radio" name="speed" value="3" id="speed-3"><span>Средне</span></label>
+          <label><input type="radio" name="speed" value="5" id="speed-5"><span>Быстро</span></label>
+        </div>
+      </div>
+
+      <div class="field row">
+        <div><span class="field-label" id="learn-label">Режим знакомства</span><p class="hint">Всё поле видно обоим глазам, чтобы освоить управление. Тренировки в этом режиме нет.</p></div>
+        <label class="switch"><input type="checkbox" id="learn" role="switch" aria-labelledby="learn-label"><span></span></label>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="ctl-title">
+      <div class="card-head"><h2 id="ctl-title">Управление</h2></div>
+      <div class="ctl-group">
+        <h3>Контроллеры Quest 2</h3>
+        <dl class="keys">
+          <div><dt>Стик ← →</dt><dd>сдвинуть фигуру</dd></div>
+          <div><dt>Стик ↓</dt><dd>ускорить падение</dd></div>
+          <div><dt><kbd>A</kbd><kbd>X</kbd></dt><dd>повернуть по часовой</dd></div>
+          <div><dt><kbd>B</kbd><kbd>Y</kbd></dt><dd>повернуть против часовой</dd></div>
+          <div><dt>Курок</dt><dd>бросить вниз</dd></div>
+          <div><dt>Нажать на стик</dt><dd>пауза</dd></div>
+          <div><dt>Хват + стик ↑ ↓</dt><dd>яркость сильного глаза ±5 %</dd></div>
+          <div><dt>Удерживать <kbd>Meta</kbd></dt><dd>поставить поле прямо перед собой</dd></div>
+        </dl>
+      </div>
+      <div class="ctl-group">
+        <h3>Клавиатура</h3>
+        <dl class="keys">
+          <div><dt><kbd>←</kbd><kbd>→</kbd></dt><dd>сдвинуть</dd></div>
+          <div><dt><kbd>↓</kbd></dt><dd>ускорить</dd></div>
+          <div><dt><kbd>↑</kbd><kbd>X</kbd> · <kbd>Z</kbd></dt><dd>повернуть / обратно</dd></div>
+          <div><dt><kbd>Пробел</kbd></dt><dd>бросить вниз</dd></div>
+          <div><dt><kbd>P</kbd> · <kbd>Enter</kbd></dt><dd>пауза / старт</dd></div>
+          <div><dt><kbd>[</kbd><kbd>]</kbd></dt><dd>яркость сильного глаза</dd></div>
+          <div><dt><kbd>Esc</kbd></dt><dd>выйти в меню</dd></div>
+        </dl>
+      </div>
+    </section>
+  </div>
+
+  <section class="card" aria-labelledby="st-title">
+    <div class="card-head">
+      <h2 id="st-title">Дневник тренировок</h2>
+      <div class="st-actions">
+        <button class="btn btn-small btn-quiet" id="st-clear" type="button">Очистить</button>
+        <span id="st-confirm" class="st-actions" hidden>
+          <span class="confirm-q">Удалить все записи?</span>
+          <button class="btn btn-small" id="st-yes" type="button">Удалить</button>
+          <button class="btn btn-small btn-quiet" id="st-no" type="button">Отмена</button>
+        </span>
+      </div>
+    </div>
+    <p id="today" class="today"></p>
+    <div class="table-wrap" id="st-wrap">
+      <table>
+        <thead><tr><th scope="col">День</th><th scope="col">Минуты</th><th scope="col">Линии</th><th scope="col">Партии</th><th scope="col">Рекорд</th><th scope="col">Яркость</th></tr></thead>
+        <tbody id="st-body"></tbody>
+      </table>
+    </div>
+    <p id="st-empty" class="empty">Записей пока нет. После первой сессии здесь появятся минуты, линии и яркость для сильного глаза по дням.</p>
+    <p class="fine">Записи хранятся только в этом браузере, на этом устройстве.</p>
+  </section>
+
+  <p class="note">Это тренажёр, а не медицинское изделие. Играйте в своих очках или линзах. Если появились головная боль, тошнота или двоение, сделайте перерыв и обсудите тренировки с офтальмологом. При косоглазии улучшение зрения слабого глаза иногда приводит к двоению, поэтому начинать лучше после консультации.</p>
+</div>
+
+<div id="play" class="play" hidden tabindex="-1" aria-label="Игровое поле">
+  <div class="play-bar">
+    <span class="play-title"><b>На экране</b> обе картинки видны сразу, поэтому это только проба. Тренировка работает в шлеме.</span>
+    <button class="btn btn-small" id="btn-exit" type="button">Выйти</button>
+  </div>
+  <div id="stage" class="stage"></div>
+  <div class="pad" id="pad">
+    <button type="button" data-act="left" aria-label="Влево">◀</button>
+    <button type="button" data-act="right" aria-label="Вправо">▶</button>
+    <button type="button" data-act="cw" aria-label="Повернуть">↻</button>
+    <button type="button" data-act="down" aria-label="Ускорить">▼</button>
+    <button type="button" data-act="drop" aria-label="Бросить">⤓</button>
+    <button type="button" data-act="pause" aria-label="Пауза или старт">II</button>
+  </div>
+</div>
+
+<script type="module">
+const THREE_URL = 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+let THREE = null;
+const threeReady = import(THREE_URL).then(m => (THREE = m)).catch(err => { console.warn('three.js не загрузился', err); return null; });
+
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function plural(n, f) { const a = Math.abs(n) % 100, b = a % 10; if (a > 10 && a < 20) return f[2]; if (b > 1 && b < 5) return f[1]; if (b === 1) return f[0]; return f[2]; }
+function fmt(sec) { sec = Math.max(0, Math.floor(sec)); return String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0'); }
+
+/* ---------- storage (per device) ---------- */
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+};
+const SKEY = 'dtetris.settings.v1', TKEY = 'dtetris.stats.v1';
+const DEFAULTS = { weak: 'left', contrast: 30, auto: true, minutes: 20, speed: 1, learn: false };
+function loadSettings() {
+  const s = Object.assign({}, DEFAULTS, store.get(SKEY, {}));
+  if (s.weak !== 'left' && s.weak !== 'right') s.weak = 'left';
+  s.contrast = clamp(Math.round((+s.contrast || 30) / 5) * 5, 10, 100);
+  s.minutes = [15, 20, 30, 45, 60].includes(+s.minutes) ? +s.minutes : 20;
+  s.speed = [1, 3, 5].includes(+s.speed) ? +s.speed : 1;
+  s.auto = !!s.auto; s.learn = !!s.learn;
+  return s;
+}
+const S = loadSettings();
+const saveSettings = () => store.set(SKEY, S);
+
+let stats = store.get(TKEY, {});
+if (!stats || typeof stats !== 'object') stats = {};
+let statsDirty = false, lastSave = 0;
+function todayKey() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function day() {
+  const k = todayKey();
+  if (!stats[k]) stats[k] = { sec: 0, lines: 0, games: 0, best: 0, contrast: S.contrast };
+  return stats[k];
+}
+function saveStats() {
+  const keys = Object.keys(stats).sort();
+  while (keys.length > 120) delete stats[keys.shift()];
+  store.set(TKEY, stats); statsDirty = false; lastSave = performance.now();
+}
+
+/* ---------- tetris rules ---------- */
+const COLS = 10, ROWS = 20;
+const TYPES = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
+const SHAPES = {
+  I: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+  O: [[1,1],[1,1]],
+  T: [[0,1,0],[1,1,1],[0,0,0]],
+  S: [[0,1,1],[1,1,0],[0,0,0]],
+  Z: [[1,1,0],[0,1,1],[0,0,0]],
+  J: [[1,0,0],[1,1,1],[0,0,0]],
+  L: [[0,0,1],[1,1,1],[0,0,0]]
+};
+const COLORS = { I: 0x2fd8f0, O: 0xffd23f, T: 0xb36bff, S: 0x46d75a, Z: 0xff4d4d, J: 0x4a82ff, L: 0xff9a2e };
+const KICKS = [[0,0],[-1,0],[1,0],[0,1],[-2,0],[2,0],[0,-1]];
+const LOCK_MS = 450;
+const speedMs = lvl => Math.max(90, Math.round(1000 * Math.pow(0.82, lvl - 1)));
+
+const G = {
+  board: [], piece: null, next: null, bag: [],
+  score: 0, lines: 0, level: 1,
+  state: 'ready', clock: 0, fallAcc: 0, groundedT: -1, lockResets: 0,
+  activeSec: 0, targetSec: 1200, toast: '', toastUntil: 0, lastNote: ''
+};
+function newBoard() { G.board = Array.from({ length: ROWS }, () => Array(COLS).fill(null)); }
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function takeType() { if (!G.bag.length) G.bag = shuffle(TYPES.slice()); return G.bag.pop(); }
+function makePiece(t) { const m = SHAPES[t].map(r => r.slice()); return { t, m, x: Math.floor((COLS - m.length) / 2), y: ROWS - 1 + (t === 'I' ? 1 : 0) }; }
+function cellsOf(m, x, y) { const out = []; for (let i = 0; i < m.length; i++) for (let j = 0; j < m[i].length; j++) if (m[i][j]) out.push([x + j, y - i]); return out; }
+function collides(m, x, y) {
+  for (const [c, r] of cellsOf(m, x, y)) {
+    if (c < 0 || c >= COLS || r < 0) return true;
+    if (r < ROWS && G.board[r][c]) return true;
+  }
+  return false;
+}
+function rotM(m, dir) { const n = m.length, r = Array.from({ length: n }, () => Array(n).fill(0)); for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { if (dir > 0) r[j][n - 1 - i] = m[i][j]; else r[n - 1 - j][i] = m[i][j]; } return r; }
+
+/* ---------- menu: settings, preview, diary ---------- */
+const SAMPLE = ['IIIIJJJ.OO', 'LLL.ZZJ.OO', 'L..ZZ.SS..', '.......SS.']; // bottom-up
+const SAMPLE_T = [[4, 16], [3, 15], [4, 15], [5, 15]];
+function toLin(hex) { return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255].map(v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); }
+function linCss(l) { return 'rgb(' + l.map(v => { const s = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; return Math.round(clamp(s, 0, 1) * 255); }).join(',') + ')'; }
+function drawPreview(canvas, eye) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = canvas.clientWidth || 160, h = w * 2;
+  canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+  const c = canvas.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  c.fillStyle = '#04060a'; c.fillRect(0, 0, w, h);
+  const pad = 8, cell = (w - pad * 2) / COLS, bh = cell * ROWS, oy = (h - bh) / 2;
+  c.fillStyle = '#090d15'; c.fillRect(pad, oy, cell * COLS, bh);
+  c.strokeStyle = '#141c2c'; c.lineWidth = 1; c.beginPath();
+  for (let i = 1; i < COLS; i++) { c.moveTo(pad + i * cell + .5, oy); c.lineTo(pad + i * cell + .5, oy + bh); }
+  for (let i = 1; i < ROWS; i++) { c.moveTo(pad, oy + i * cell + .5); c.lineTo(pad + cell * COLS, oy + i * cell + .5); }
+  c.stroke();
+  c.strokeStyle = '#4f5b76'; c.lineWidth = 2; c.strokeRect(pad - 1, oy - 1, cell * COLS + 2, bh + 2);
+  const weak = S.weak === eye, k = S.learn ? 1 : S.contrast / 100;
+  const block = (col, row, hex, kk) => {
+    const x = pad + col * cell, y = oy + (ROWS - 1 - row) * cell;
+    c.fillStyle = linCss(toLin(hex).map(v => v * kk)); c.fillRect(x + .8, y + .8, cell - 1.6, cell - 1.6);
+  };
+  if (S.learn || !weak) SAMPLE.forEach((row, r) => [...row].forEach((ch, col) => { if (ch !== '.') block(col, r, COLORS[ch], k); }));
+  if (S.learn || weak) SAMPLE_T.forEach(([col, row]) => block(col, row, COLORS.T, 1));
+}
+function drawPreviews() { drawPreview($('#pv-left'), 'left'); drawPreview($('#pv-right'), 'right'); }
+
+function reflectSettings() {
+  $$('input[name=weak]').forEach(i => { i.checked = i.value === S.weak; });
+  $$('input[name=minutes]').forEach(i => { i.checked = +i.value === S.minutes; });
+  $$('input[name=speed]').forEach(i => { i.checked = +i.value === S.speed; });
+  $('#contrast').value = S.contrast;
+  $('#contrast-out').textContent = S.contrast + ' %';
+  $('#auto').checked = S.auto; $('#learn').checked = S.learn;
+  for (const eye of ['left', 'right']) {
+    const weak = S.weak === eye, role = $('#role-' + eye), cap = $('#cap-' + eye);
+    role.textContent = weak ? 'слабый' : 'сильный';
+    role.classList.toggle('is-weak', weak);
+    cap.textContent = S.learn ? 'Видит всё поле: включён режим знакомства.'
+      : weak ? 'Видит падающую фигуру и следующую. Полная яркость.'
+      : `Видит уложенные блоки. Яркость ${S.contrast} %.`;
+  }
+  drawPreviews();
+}
+function onSettings() {
+  saveSettings(); reflectSettings();
+  if (E) { applyLayers(); E.dirty.board = E.dirty.piece = E.dirty.next = true; E.hudKey = ''; }
+}
+function bindSettings() {
+  $$('input[name=weak]').forEach(i => i.addEventListener('change', () => { S.weak = i.value; onSettings(); }));
+  $$('input[name=minutes]').forEach(i => i.addEventListener('change', () => { S.minutes = +i.value; onSettings(); }));
+  $$('input[name=speed]').forEach(i => i.addEventListener('change', () => { S.speed = +i.value; onSettings(); }));
+  $('#contrast').addEventListener('input', e => { S.contrast = +e.target.value; day().contrast = S.contrast; statsDirty = true; onSettings(); });
+  $('#auto').addEventListener('change', e => { S.auto = e.target.checked; onSettings(); });
+  $('#learn').addEventListener('change', e => { S.learn = e.target.checked; onSettings(); });
+}
+
+function renderStats() {
+  const keys = Object.keys(stats).sort().reverse().slice(0, 14);
+  const body = $('#st-body'); body.textContent = '';
+  for (const k of keys) {
+    const d = stats[k], mins = Math.round((d.sec || 0) / 60);
+    const tr = document.createElement('tr');
+    const date = new Date(k + 'T12:00:00').toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+    const pct = clamp(Math.round(mins / S.minutes * 100), 0, 100);
+    tr.innerHTML = `<td></td><td><span class="mins"><span class="bar${pct >= 100 ? ' full' : ''}"><i style="width:${pct}%"></i></span><span></span></span></td><td></td><td></td><td></td><td></td>`;
+    const td = tr.children;
+    td[0].textContent = date;
+    td[1].querySelector('.mins > span:last-child').textContent = mins;
+    td[2].textContent = d.lines || 0; td[3].textContent = d.games || 0;
+    td[4].textContent = d.best || 0; td[5].textContent = (d.contrast ?? S.contrast) + ' %';
+    body.appendChild(tr);
+  }
+  $('#st-wrap').hidden = !keys.length; $('#st-empty').hidden = !!keys.length;
+  const t = stats[todayKey()];
+  const mins = t ? Math.round(t.sec / 60) : 0, lines = t ? t.lines : 0;
+  $('#today').innerHTML = `Сегодня: <b>${mins}</b> из ${S.minutes} мин · <b>${lines}</b> ${plural(lines, ['линия', 'линии', 'линий'])}`;
+}
+function bindStats() {
+  $('#st-clear').addEventListener('click', () => { $('#st-clear').hidden = true; $('#st-confirm').hidden = false; $('#st-no').focus(); });
+  $('#st-no').addEventListener('click', () => { $('#st-confirm').hidden = true; $('#st-clear').hidden = false; });
+  $('#st-yes').addEventListener('click', () => { stats = {}; store.del(TKEY); $('#st-confirm').hidden = true; $('#st-clear').hidden = false; renderStats(); });
+}
+
+/* ---------- 3D engine ---------- */
+const CELL = 0.05, BZ = -1.5, BX = -0.2, BY = -0.06;
+const HW = 0.34, HH = 0.51, HX = 0.28, HY = BY + ROWS * CELL / 2 - HH / 2;
+const NEXT_CELL = 0.034, NEXT_Y = HY + HH / 2 - (140 / 768) * HH;
+let E = null, mode = 'menu';
+
+function buildEngine() {
+  const canvas = document.createElement('canvas');
+  $('#stage').appendChild(canvas);
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.xr.enabled = true;
+  renderer.xr.setReferenceSpaceType('local');
+  renderer.xr.setFoveation(0);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x04060a);
+  const camera = new THREE.PerspectiveCamera(50, 1, 0.05, 30);
+  scene.add(camera);
+
+  const HIDE = new THREE.Matrix4().makeScale(0, 0, 0);
+  const tc = document.createElement('canvas'); tc.width = tc.height = 64;
+  const t = tc.getContext('2d');
+  t.fillStyle = '#e4e4e4'; t.fillRect(0, 0, 64, 64);
+  t.fillStyle = '#ffffff'; t.fillRect(0, 0, 64, 7); t.fillRect(0, 0, 7, 64);
+  t.fillStyle = '#8a8a8a'; t.fillRect(0, 57, 64, 7); t.fillRect(57, 0, 7, 64);
+  t.fillStyle = '#f0f0f0'; t.fillRect(18, 18, 28, 28);
+  const blockTex = new THREE.CanvasTexture(tc); blockTex.colorSpace = THREE.SRGBColorSpace;
+  const blockGeo = new THREE.PlaneGeometry(1, 1);
+  const white = new THREE.Color(1, 1, 1);
+  function blocks(count) {
+    const m = new THREE.InstancedMesh(blockGeo, new THREE.MeshBasicMaterial({ map: blockTex }), count);
+    m.frustumCulled = false;
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < count; i++) { m.setMatrixAt(i, HIDE); m.setColorAt(i, white); }
+    scene.add(m); return m;
+  }
+
+  const back = new THREE.Mesh(new THREE.PlaneGeometry(COLS * CELL, ROWS * CELL), new THREE.MeshBasicMaterial({ color: 0x090d15 }));
+  back.position.set(BX, BY, BZ - 0.004); scene.add(back);
+
+  const gp = [];
+  const x0 = BX - COLS * CELL / 2, y0 = BY - ROWS * CELL / 2;
+  for (let i = 1; i < COLS; i++) gp.push(x0 + i * CELL, y0, BZ - 0.002, x0 + i * CELL, y0 + ROWS * CELL, BZ - 0.002);
+  for (let i = 1; i < ROWS; i++) gp.push(x0, y0 + i * CELL, BZ - 0.002, x0 + COLS * CELL, y0 + i * CELL, BZ - 0.002);
+  const gridGeo = new THREE.BufferGeometry(); gridGeo.setAttribute('position', new THREE.Float32BufferAttribute(gp, 3));
+  scene.add(new THREE.LineSegments(gridGeo, new THREE.LineBasicMaterial({ color: 0x151d2e })));
+
+  const frameMat = new THREE.MeshBasicMaterial({ color: 0x4f5b76 });
+  const th = 0.008, fw = COLS * CELL + th * 2, fh = ROWS * CELL + th * 2;
+  [[BX, BY + fh / 2 - th / 2, fw, th], [BX, BY - fh / 2 + th / 2, fw, th], [BX - fw / 2 + th / 2, BY, th, fh], [BX + fw / 2 - th / 2, BY, th, fh]].forEach(([x, y, w, h]) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), frameMat); m.position.set(x, y, BZ); scene.add(m);
+  });
+
+  const boardMesh = blocks(ROWS * COLS), pieceMesh = blocks(4), nextMesh = blocks(4);
+
+  const maxAniso = renderer.capabilities.getMaxAnisotropy();
+  function panel(w, h, cw, ch, x, y, z) {
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = maxAniso;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+    mesh.position.set(x, y, z); scene.add(mesh);
+    return { ctx: cv.getContext('2d'), tex, mesh };
+  }
+  const hud = panel(HW, HH, 512, 768, HX, HY, BZ);
+  const msg = panel(0.64, 0.32, 1024, 512, 0.04, BY + 0.12, BZ + 0.06);
+
+  return { renderer, scene, camera, HIDE, boardMesh, pieceMesh, nextMesh, frameMat, hud, msg,
+    dirty: { board: true, piece: true, next: true, msg: true }, hudKey: '', last: null, flashUntil: 0,
+    m4: new THREE.Matrix4(), v3: new THREE.Vector3(), s3: new THREE.Vector3(), q: new THREE.Quaternion(), col: new THREE.Color() };
+}
+
+function applyLayers() {
+  const weakL = S.learn ? 0 : (S.weak === 'left' ? 1 : 2), strongL = S.learn ? 0 : (S.weak === 'left' ? 2 : 1);
+  E.pieceMesh.layers.set(weakL); E.nextMesh.layers.set(weakL); E.boardMesh.layers.set(strongL);
+}
+function setBlock(mesh, i, x, y, z, size, hex, k) {
+  E.m4.compose(E.v3.set(x, y, z), E.q, E.s3.set(size, size, 1));
+  mesh.setMatrixAt(i, E.m4);
+  E.col.setHex(hex).multiplyScalar(k);
+  mesh.setColorAt(i, E.col);
+}
+const cellX = c => BX - COLS * CELL / 2 + (c + 0.5) * CELL;
+const cellY = r => BY - ROWS * CELL / 2 + (r + 0.5) * CELL;
+function syncBoard() {
+  const k = S.learn ? 1 : S.contrast / 100, m = E.boardMesh;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    const i = r * COLS + c, t = G.board[r][c];
+    if (t) setBlock(m, i, cellX(c), cellY(r), BZ + 0.001, CELL * 0.94, COLORS[t], k); else m.setMatrixAt(i, E.HIDE);
+  }
+  m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  E.dirty.board = false;
+}
+function syncPiece() {
+  const m = E.pieceMesh, p = G.piece, show = p && (G.state === 'playing' || G.state === 'paused' || G.state === 'done');
+  const cells = show ? cellsOf(p.m, p.x, p.y) : [];
+  for (let i = 0; i < 4; i++) {
+    const cr = cells[i];
+    if (cr && cr[1] < ROWS) setBlock(m, i, cellX(cr[0]), cellY(cr[1]), BZ + 0.002, CELL * 0.94, COLORS[p.t], 1); else m.setMatrixAt(i, E.HIDE);
+  }
+  m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  E.dirty.piece = false;
+}
+function syncNext() {
+  const m = E.nextMesh, t = G.next;
+  const cells = t ? cellsOf(SHAPES[t], 0, 0) : [];
+  let minC = 9, maxC = -9, minR = 9, maxR = -9;
+  for (const [c, r] of cells) { minC = Math.min(minC, c); maxC = Math.max(maxC, c); minR = Math.min(minR, r); maxR = Math.max(maxR, r); }
+  const cx = (minC + maxC) / 2, cy = (minR + maxR) / 2;
+  for (let i = 0; i < 4; i++) {
+    const cr = cells[i];
+    if (cr) setBlock(m, i, HX + (cr[0] - cx) * NEXT_CELL, NEXT_Y + (cr[1] - cy) * NEXT_CELL, BZ + 0.004, NEXT_CELL * 0.94, COLORS[t], 1); else m.setMatrixAt(i, E.HIDE);
+  }
+  m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  E.dirty.next = false;
+}
+
+function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+const F = { label: '600 24px "Golos Text", system-ui, sans-serif', big: '800 60px "Unbounded", system-ui, sans-serif', mid: '800 44px "Unbounded", system-ui, sans-serif', mono: '700 38px "JetBrains Mono", ui-monospace, monospace', small: '500 22px "Golos Text", system-ui, sans-serif' };
+function hudKey(now) { return [G.score, G.lines, G.level, Math.floor(G.activeSec), G.targetSec, S.contrast, S.weak, S.learn, now < G.toastUntil ? G.toast : ''].join('|'); }
+function drawHUD(now) {
+  const c = E.hud.ctx, W = 512, H = 768;
+  c.clearRect(0, 0, W, H);
+  rr(c, 3, 3, W - 6, H - 6, 28); c.fillStyle = '#0d1322'; c.fill(); c.lineWidth = 3; c.strokeStyle = '#26324c'; c.stroke();
+  const label = (s, x, y, color = '#8e98ad') => { c.font = F.label; c.fillStyle = color; c.fillText(s, x, y); };
+  c.textBaseline = 'alphabetic';
+  label('СЛЕДУЮЩАЯ', 40, 58);
+  c.fillStyle = '#26324c'; c.fillRect(40, 222, W - 80, 2);
+  label('ОЧКИ', 40, 276);
+  c.font = F.big; c.fillStyle = '#e8ecf4'; c.fillText(String(G.score), 40, 344);
+  label('ЛИНИИ', 40, 410); label('УРОВЕНЬ', 280, 410);
+  c.font = F.mid; c.fillStyle = '#e8ecf4'; c.fillText(String(G.lines), 40, 464); c.fillText(String(G.level), 280, 464);
+  label('ВРЕМЯ СЕССИИ', 40, 530);
+  c.font = F.mono; c.fillStyle = '#e8ecf4'; c.fillText(fmt(G.activeSec) + ' / ' + fmt(G.targetSec), 40, 578);
+  const p = clamp(G.activeSec / G.targetSec, 0, 1);
+  rr(c, 40, 596, W - 80, 10, 5); c.fillStyle = '#26324c'; c.fill();
+  if (p > 0) { rr(c, 40, 596, Math.max(10, (W - 80) * p), 10, 5); c.fillStyle = '#e8ecf4'; c.fill(); }
+  if (S.learn) {
+    label('РЕЖИМ ЗНАКОМСТВА', 40, 660);
+    c.font = F.small; c.fillStyle = '#c3cad8'; c.fillText('Всё видно обоим глазам', 40, 700);
+  } else {
+    const strong = S.weak === 'left' ? 'right' : 'left';
+    const col = strong === 'left' ? '#ff6a5c' : '#3fd5e6';
+    label('СИЛЬНЫЙ ГЛАЗ · ' + (strong === 'left' ? 'OS' : 'OD'), 40, 660, col);
+    c.font = F.mid; c.fillStyle = col; c.fillText(S.contrast + ' %', 40, 714);
+  }
+  if (now < G.toastUntil && G.toast) { c.font = F.small; c.fillStyle = '#e8ecf4'; c.textAlign = 'right'; c.fillText(G.toast, W - 40, 744); c.textAlign = 'left'; }
+  E.hud.tex.needsUpdate = true;
+}
+function wrapText(c, text, maxW) {
+  const words = text.split(' '), lines = []; let cur = '';
+  for (const w of words) { const t = cur ? cur + ' ' + w : w; if (c.measureText(t).width > maxW && cur) { lines.push(cur); cur = w; } else cur = t; }
+  if (cur) lines.push(cur); return lines;
+}
+function msgContent() {
+  const xr = mode === 'xr';
+  const go = xr ? 'Нажмите A или курок' : 'Нажмите Enter';
+  const weakName = S.weak === 'left' ? 'левый, OS' : 'правый, OD';
+  switch (G.state) {
+    case 'ready': return ['Готово', [
+      S.learn ? 'Режим знакомства: всё поле видно обоим глазам.' : `Падающие фигуры видит слабый глаз (${weakName}), стакан — сильный.`,
+      go + ', чтобы начать.',
+      xr ? 'Поле не по центру? Удерживайте кнопку Meta на правом контроллере.' : 'На экране обе картинки видны сразу. Тренировка работает в шлеме.']];
+    case 'paused': return ['Пауза', [xr ? 'Нажмите на стик или A, чтобы продолжить.' : 'P или Enter — продолжить.', `Сыграно ${fmt(G.activeSec)} из ${fmt(G.targetSec)}.`]];
+    case 'over': return ['Партия окончена', [`Очки: ${G.score} · линии: ${G.lines}`, G.lastNote, go + ' — новая партия.'].filter(Boolean)];
+    case 'done': return ['Сессия завершена', [`${Math.round(G.targetSec / 60)} мин тренировки. Можно снять шлем и отдохнуть.`, (xr ? 'A' : 'Enter') + ' — ещё 5 минут.']];
+  }
+  return null;
+}
+function drawMsg() {
+  const content = msgContent();
+  E.msg.mesh.visible = !!content;
+  E.dirty.msg = false;
+  if (!content) return;
+  const c = E.msg.ctx, W = 1024, H = 512, [title, lines] = content;
+  c.clearRect(0, 0, W, H);
+  rr(c, 4, 4, W - 8, H - 8, 36); c.fillStyle = 'rgba(9,13,22,0.95)'; c.fill(); c.lineWidth = 4; c.strokeStyle = '#3a4766'; c.stroke();
+  c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+  c.font = '800 54px "Unbounded", system-ui, sans-serif'; c.fillStyle = '#e8ecf4'; c.fillText(title, W / 2, 112);
+  c.font = '500 32px "Golos Text", system-ui, sans-serif'; c.fillStyle = '#c3cad8';
+  let y = 186;
+  for (const ln of lines) for (const part of wrapText(c, ln, W - 140)) { c.fillText(part, W / 2, y); y += 46; }
+  c.textAlign = 'left';
+  E.msg.tex.needsUpdate = true;
+}
+
+/* ---------- game flow ---------- */
+function toast(s) { G.toast = s; G.toastUntil = performance.now() + 2600; }
+function setState(s) { G.state = s; E.dirty.msg = true; E.dirty.piece = true; if (s !== 'playing') saveStats(); }
+function resetSession() {
+  newBoard(); G.piece = null; G.next = null; G.bag = [];
+  G.score = 0; G.lines = 0; G.level = S.speed; G.activeSec = 0; G.targetSec = S.minutes * 60; G.lastNote = '';
+  applyLayers();
+  E.dirty.board = E.dirty.piece = E.dirty.next = true; E.hudKey = '';
+  setState('ready');
+}
+function startGame() {
+  newBoard(); G.bag = []; G.score = 0; G.lines = 0; G.level = S.speed; G.lastNote = '';
+  G.next = takeType();
+  E.dirty.board = true;
+  G.state = 'playing'; E.dirty.msg = true;
+  spawn();
+}
+function spawn() {
+  const t = G.next || takeType(); G.next = takeType();
+  G.piece = makePiece(t); G.groundedT = -1; G.lockResets = 0; G.fallAcc = 0;
+  E.dirty.piece = E.dirty.next = true;
+  if (collides(G.piece.m, G.piece.x, G.piece.y)) gameOver();
+}
+function touchLock() { if (G.groundedT >= 0 && G.lockResets < 12) { G.groundedT = G.clock; G.lockResets++; } }
+function move(dx) { const p = G.piece; if (p && !collides(p.m, p.x + dx, p.y)) { p.x += dx; touchLock(); E.dirty.piece = true; } }
+function rotate(dir) {
+  const p = G.piece; if (!p || p.t === 'O') return;
+  const nm = rotM(p.m, dir);
+  const kicks = p.t === 'I' ? KICKS.concat([[0, 2], [0, -2]]) : KICKS;
+  for (const [kx, ky] of kicks) if (!collides(nm, p.x + kx, p.y + ky)) { p.m = nm; p.x += kx; p.y += ky; touchLock(); E.dirty.piece = true; return; }
+}
+function softDrop() { const p = G.piece; if (p && !collides(p.m, p.x, p.y - 1)) { p.y--; G.score++; G.fallAcc = 0; G.groundedT = -1; E.dirty.piece = true; } }
+function hardDrop() { const p = G.piece; if (!p) return; let n = 0; while (!collides(p.m, p.x, p.y - 1)) { p.y--; n++; } G.score += n * 2; lock(); }
+function lock() {
+  const p = G.piece; let top = false;
+  for (const [c, r] of cellsOf(p.m, p.x, p.y)) { if (r >= ROWS) top = true; else G.board[r][c] = p.t; }
+  G.piece = null; E.dirty.piece = E.dirty.board = true;
+  if (top) { gameOver(); return; }
+  const keep = G.board.filter(row => row.some(v => !v));
+  const n = ROWS - keep.length;
+  if (n) {
+    while (keep.length < ROWS) keep.push(Array(COLS).fill(null));
+    G.board = keep;
+    const before = G.lines, pts = [0, 100, 300, 500, 800][n] * G.level;
+    G.lines += n; G.score += pts; G.level = S.speed + Math.floor(G.lines / 10);
+    day().lines += n; statsDirty = true;
+    pulse(0.5, 70); E.flashUntil = performance.now() + 180;
+    if (S.auto && !S.learn && Math.floor(G.lines / 10) > Math.floor(before / 10) && S.contrast < 100) nudgeContrast(5, 'Авто-баланс');
+    else toast((n === 4 ? 'Тетрис! ' : '') + '+' + pts);
+  }
+  spawn();
+}
+function gameOver() {
+  G.piece = null;
+  const d = day(); d.games += 1; d.best = Math.max(d.best || 0, G.score); statsDirty = true;
+  G.lastNote = '';
+  if (S.auto && !S.learn && G.lines < 5 && S.contrast > 10) { nudgeContrast(-5, 'Авто-баланс'); G.lastNote = `Авто-баланс снизил яркость сильного глаза до ${S.contrast} %.`; }
+  pulse(0.8, 160);
+  setState('over');
+}
+function nudgeContrast(d, why) {
+  const v = clamp(S.contrast + d, 10, 100);
+  if (v === S.contrast) return;
+  S.contrast = v; saveSettings(); day().contrast = v; statsDirty = true;
+  reflectSettings();
+  if (E) E.dirty.board = true;
+  toast(`${why}: ${v} %`);
+}
+function pulse(intensity, ms) {
+  const s = E && E.renderer.xr.getSession(); if (!s) return;
+  for (const src of s.inputSources) { const h = src.gamepad && src.gamepad.hapticActuators && src.gamepad.hapticActuators[0]; try { if (h && h.pulse) h.pulse(intensity, ms); } catch (e) {} }
+}
+function act(a) {
+  if (!E) return;
+  if (G.state === 'playing') {
+    if (a === 'left') move(-1); else if (a === 'right') move(1); else if (a === 'down') softDrop();
+    else if (a === 'cw') rotate(1); else if (a === 'ccw') rotate(-1); else if (a === 'drop') hardDrop();
+    else if (a === 'pause') setState('paused');
+    return;
+  }
+  if (G.state === 'paused') { if (a === 'pause' || a === 'confirm' || a === 'cw') setState('playing'); return; }
+  if (a === 'confirm' || a === 'cw' || a === 'drop' || a === 'pause') {
+    if (G.state === 'ready' || G.state === 'over') startGame();
+    else if (G.state === 'done') { G.targetSec += 300; G.state = G.piece ? 'playing' : 'ready'; E.dirty.msg = E.dirty.piece = true; if (!G.piece) startGame(); }
+  }
+}
+function update(dt) {
+  if (G.state !== 'playing' || !G.piece) return;
+  G.clock += dt * 1000; G.activeSec += dt;
+  day().sec += dt; statsDirty = true;
+  const p = G.piece, interval = speedMs(G.level);
+  if (!collides(p.m, p.x, p.y - 1)) {
+    G.groundedT = -1; G.fallAcc += dt * 1000;
+    while (G.fallAcc >= interval) {
+      G.fallAcc -= interval;
+      if (!collides(p.m, p.x, p.y - 1)) { p.y--; E.dirty.piece = true; } else { G.fallAcc = 0; break; }
+    }
+  }
+  if (G.piece && collides(G.piece.m, G.piece.x, G.piece.y - 1)) {
+    if (G.groundedT < 0) G.groundedT = G.clock;
+    else if (G.clock - G.groundedT >= LOCK_MS) lock();
+  }
+  if (G.state === 'playing' && G.activeSec >= G.targetSec) { pulse(0.6, 200); setState('done'); }
+}
+
+/* ---------- input ---------- */
+const prevBtn = { left: [], right: [], none: [] };
+const rep = { dir: 0, next: 0, soft: 0, c: 0 };
+function pollXR(now) {
+  const s = E.renderer.xr.getSession(); if (!s) return;
+  let ax = 0, ay = 0, grip = false; const edges = [];
+  for (const src of s.inputSources) {
+    const gp = src.gamepad; if (!gp) continue;
+    const h = src.handedness === 'left' || src.handedness === 'right' ? src.handedness : 'none';
+    const a = gp.axes, x = a.length >= 4 ? a[2] : (a[0] || 0), y = a.length >= 4 ? a[3] : (a[1] || 0);
+    if (Math.abs(x) > Math.abs(ax)) ax = x;
+    if (Math.abs(y) > Math.abs(ay)) ay = y;
+    const prev = prevBtn[h];
+    gp.buttons.forEach((b, i) => { if (b.pressed && !prev[i]) edges.push(i); prev[i] = b.pressed; });
+    if (gp.buttons[1] && gp.buttons[1].pressed) grip = true;
+  }
+  for (const i of edges) { if (i === 0) act('drop'); else if (i === 4) act('cw'); else if (i === 5) act('ccw'); else if (i === 3) act('pause'); }
+  if (grip) {
+    const d = ay < -0.6 ? 1 : ay > 0.6 ? -1 : 0;
+    if (d && now >= rep.c) { nudgeContrast(5 * d, 'Сильный глаз'); rep.c = now + 300; }
+    if (!d) rep.c = 0;
+    rep.dir = 0; return;
+  }
+  const dir = ax > 0.55 ? 1 : ax < -0.55 ? -1 : 0;
+  if (dir) {
+    if (dir !== rep.dir) { act(dir > 0 ? 'right' : 'left'); rep.next = now + 210; }
+    else if (now >= rep.next) { act(dir > 0 ? 'right' : 'left'); rep.next = now + 65; }
+  }
+  rep.dir = dir;
+  if (ay > 0.6 && now >= rep.soft) { act('down'); rep.soft = now + 45; }
+}
+const KEYMAP = { ArrowLeft: 'left', ArrowRight: 'right', ArrowDown: 'down', ArrowUp: 'cw', KeyX: 'cw', KeyZ: 'ccw', Space: 'drop', KeyP: 'pause', Enter: 'confirm', NumpadEnter: 'confirm' };
+window.addEventListener('keydown', e => {
+  if (mode !== 'screen') return;
+  if (e.code === 'Escape') { e.preventDefault(); exitScreen(); return; }
+  if (e.code === 'BracketLeft' || e.code === 'BracketRight') { e.preventDefault(); nudgeContrast(e.code === 'BracketRight' ? 5 : -5, 'Сильный глаз'); return; }
+  const a = KEYMAP[e.code]; if (!a) return;
+  e.preventDefault();
+  if (e.repeat && !(a === 'left' || a === 'right' || a === 'down')) return;
+  act(a);
+});
+let padTimer = null;
+function padStop() { clearTimeout(padTimer); clearInterval(padTimer); padTimer = null; }
+$$('#pad button').forEach(b => {
+  const a = b.dataset.act;
+  b.addEventListener('pointerdown', e => {
+    e.preventDefault(); act(a === 'pause' ? (G.state === 'playing' ? 'pause' : 'confirm') : a); padStop();
+    if (a === 'left' || a === 'right' || a === 'down') padTimer = setTimeout(() => { padTimer = setInterval(() => act(a), a === 'down' ? 50 : 80); }, 200);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => b.addEventListener(t, padStop));
+});
+
+/* ---------- loop ---------- */
+function tick(time) {
+  const dt = E.last == null ? 0 : clamp((time - E.last) / 1000, 0, 0.1);
+  E.last = time;
+  const now = performance.now();
+  if (mode === 'xr') pollXR(now);
+  update(dt);
+  if (E.dirty.board) syncBoard();
+  if (E.dirty.piece) syncPiece();
+  if (E.dirty.next) syncNext();
+  if (E.dirty.msg) drawMsg();
+  const hk = hudKey(now); if (hk !== E.hudKey) { E.hudKey = hk; drawHUD(now); }
+  E.frameMat.color.setHex(now < E.flashUntil ? 0xd2dbef : 0x4f5b76);
+  if (statsDirty && now - lastSave > 5000) saveStats();
+  E.renderer.render(E.scene, E.camera);
+}
+
+/* ---------- modes ---------- */
+function setStatus(text, ok) { const s = $('#vr-status'); s.textContent = text; s.classList.toggle('ok', !!ok); }
+async function ensureEngine() {
+  if (E) return true;
+  if (!THREE) await threeReady;
+  if (!THREE) { setStatus('Не удалось загрузить 3D-движок. Проверьте интернет и обновите страницу.'); return false; }
+  try { E = buildEngine(); }
+  catch (e) { console.error(e); setStatus('Браузер не смог запустить 3D-графику (WebGL).'); return false; }
+  new ResizeObserver(() => { if (mode === 'screen') fitCamera(); }).observe($('#stage'));
+  if (document.fonts) document.fonts.ready.then(() => { if (E) { E.hudKey = ''; E.dirty.msg = true; } });
+  return true;
+}
+function fitCamera() {
+  const st = $('#stage'), w = Math.max(1, st.clientWidth), h = Math.max(1, st.clientHeight);
+  E.renderer.setSize(w, h, false);
+  const cam = E.camera; cam.aspect = w / h;
+  const minX = BX - COLS * CELL / 2 - 0.04, maxX = HX + HW / 2 + 0.04, minY = BY - ROWS * CELL / 2 - 0.05, maxY = BY + ROWS * CELL / 2 + 0.05;
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2, t = Math.tan(cam.fov * Math.PI / 360);
+  const D = Math.max((maxY - minY) / 2 / t, (maxX - minX) / 2 / (t * cam.aspect));
+  cam.position.set(cx, cy, BZ + D); cam.quaternion.identity(); cam.lookAt(cx, cy, BZ);
+  cam.updateProjectionMatrix();
+}
+async function enterScreen() {
+  if (mode !== 'menu' || !(await ensureEngine())) return;
+  mode = 'screen';
+  $('#play').hidden = false; document.body.classList.add('playing');
+  E.camera.layers.enable(1); E.camera.layers.enable(2);
+  resetSession(); fitCamera(); E.last = null;
+  E.renderer.setAnimationLoop(tick);
+  $('#play').focus();
+}
+function exitScreen() {
+  if (mode !== 'screen') return;
+  E.renderer.setAnimationLoop(null);
+  saveStats(); mode = 'menu';
+  $('#play').hidden = true; document.body.classList.remove('playing');
+  padStop(); renderStats(); $('#btn-screen').focus();
+}
+async function enterVR() {
+  if (mode !== 'menu') return;
+  if (!(await ensureEngine())) return;
+  let session;
+  try { session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] }); }
+  catch (e) { setStatus('Не получилось запустить VR (' + (e.name || 'ошибка') + '). Откройте игру по прямой ссылке в браузере Quest.'); return; }
+  mode = 'xr';
+  E.camera.layers.set(0);
+  resetSession(); E.last = null;
+  prevBtn.left = []; prevBtn.right = []; prevBtn.none = [];
+  session.addEventListener('end', onXREnd);
+  session.addEventListener('visibilitychange', () => { if (session.visibilityState !== 'visible' && G.state === 'playing') setState('paused'); });
+  try { await E.renderer.xr.setSession(session); }
+  catch (e) { console.error(e); setStatus('VR-сессия не запустилась. Попробуйте ещё раз.'); try { session.end(); } catch (_) {} return; }
+  E.renderer.setAnimationLoop(tick);
+}
+function onXREnd() {
+  if (G.state === 'playing') G.state = 'paused';
+  E.renderer.setAnimationLoop(null);
+  saveStats(); mode = 'menu'; renderStats();
+  setStatus('Сессия в шлеме закрыта. Можно войти снова.', true);
+}
+async function checkVR() {
+  const btn = $('#btn-vr');
+  if (!('xr' in navigator)) { setStatus('В этом браузере нет VR. Здесь можно поиграть на экране, а для тренировки откройте эту страницу в браузере Quest 2.'); return; }
+  if (document.featurePolicy && document.featurePolicy.allowsFeature && !document.featurePolicy.allowsFeature('xr-spatial-tracking')) {
+    setStatus('Это окно не пускает в VR. Откройте игру по прямой ссылке в браузере Quest 2.'); return;
+  }
+  let ok = false; try { ok = await navigator.xr.isSessionSupported('immersive-vr'); } catch (e) {}
+  if (ok) { btn.disabled = false; setStatus('Шлем на связи. Нажмите «Войти в VR».', true); }
+  else setStatus('VR-шлем не найден. Здесь можно поиграть на экране, а для тренировки откройте эту страницу в браузере Quest 2.');
+}
+
+$('#btn-vr').addEventListener('click', enterVR);
+$('#btn-screen').addEventListener('click', enterScreen);
+$('#btn-exit').addEventListener('click', exitScreen);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (mode === 'screen' && G.state === 'playing') setState('paused'); saveStats(); }
+});
+window.addEventListener('pagehide', () => { if (statsDirty) saveStats(); });
+
+bindSettings(); bindStats(); reflectSettings(); renderStats(); checkVR();
+new ResizeObserver(drawPreviews).observe($('.eyes'));
+if (document.fonts) document.fonts.ready.then(drawPreviews);
+</script>
+</body>
+</html>
